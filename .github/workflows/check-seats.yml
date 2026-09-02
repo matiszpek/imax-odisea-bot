@@ -9,7 +9,7 @@ on:
   # Recomendado: dejar el repo PÚBLICO (Actions ilimitado) o subir el
   # intervalo a "*/20" o "*/30".
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "3,13,23,33,43,53 * * * *"
   # Permite correrlo manualmente desde la pestaña "Actions" en GitHub.
   workflow_dispatch:
 
