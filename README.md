@@ -1,3 +1,5 @@
+[![Chequear butacas La Odisea IMAX Norcenter](https://github.com/matiszpek/imax-odisea-bot/actions/workflows/check-seats.yml/badge.svg)](https://github.com/matiszpek/imax-odisea-bot/actions/workflows/check-seats.yml)
+
 # Bot de butacas — La Odisea, IMAX Theatre (Norcenter)
 
 Cada 10 minutos revisa las funciones IMAX de **La Odisea** en el
