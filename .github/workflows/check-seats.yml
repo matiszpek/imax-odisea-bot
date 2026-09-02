@@ -50,7 +50,7 @@ jobs:
           NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
           MONITOR_START_HOUR: "16"
           MONITOR_END_HOUR: "24"
-          CANTIDAD_ENTRADAS: "2"
+          CANTIDAD_ENTRADAS: "3"
         run: python main.py
 
       - name: Guardar funciones ya avisadas
