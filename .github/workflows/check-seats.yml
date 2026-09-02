@@ -1,0 +1,68 @@
+name: Chequear butacas La Odisea IMAX Norcenter
+
+on:
+  # Corre cada 10 minutos. GitHub no garantiza el minuto exacto (puede
+  # demorar unos minutos en horas pico), pero para este caso alcanza.
+  #
+  # OJO con los minutos de GitHub Actions: cada corrida usa ~1-2 min.
+  # En un repo PRIVADO el plan gratis da 2000 min/mes y esto se pasa.
+  # Recomendado: dejar el repo PÚBLICO (Actions ilimitado) o subir el
+  # intervalo a "*/20" o "*/30".
+  schedule:
+    - cron: "*/10 * * * *"
+  # Permite correrlo manualmente desde la pestaña "Actions" en GitHub.
+  workflow_dispatch:
+
+# El bot necesita poder commitear state/notified.json de vuelta al repo
+# para acordarse de qué funciones ya avisó.
+permissions:
+  contents: write
+
+# No dejar que dos corridas se pisen al escribir el estado.
+concurrency:
+  group: check-seats
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Descargar el código del repo
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Correr el chequeo
+        env:
+          SHOWCASE_USER: ${{ secrets.SHOWCASE_USER }}
+          SHOWCASE_PASS: ${{ secrets.SHOWCASE_PASS }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          MONITOR_START_HOUR: "16"
+          MONITOR_END_HOUR: "24"
+          CANTIDAD_ENTRADAS: "2"
+        run: python main.py
+
+      - name: Guardar funciones ya avisadas
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state/notified.json)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git pull --rebase --autostash || true
+            git add state/notified.json
+            git commit -m "chore: actualizar funciones ya avisadas [skip ci]"
+            git push
+          else
+            echo "Sin cambios en el estado."
+          fi
