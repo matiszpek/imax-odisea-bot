@@ -8,17 +8,14 @@ función**.
 
 ## Estado actual
 
-- ✅ Lectura de la grilla de horarios: **funciona y está probada en vivo**.
-  El sitio trae toda la agenda IMAX embebida en un objeto JS (`op_data`),
-  así que sacar fechas/horarios/`performanceId` es directo y confiable.
-- ⚠️ Login + mapa de butacas: **escrito pero NO probado en vivo**, porque
-  hace falta una cuenta real de Showcase. El sitio cambió respecto de la
-  primera versión de este bot: **ahora exige iniciar sesión** (DNI/email
-  + contraseña, sin opción de invitado) para llegar al mapa de butacas.
-  El primer arranque casi seguro necesita un ajuste fino en
-  `_navegar_hasta_mapa` (la pantalla de "cantidad de entradas" previa al
-  mapa). **Corré el bot una vez en tu compu con el navegador visible
-  antes de confiar en el cron** (ver más abajo).
+- ✅ **Todo el flujo funciona y está probado en vivo** (07/09/2026): login
+  con cuenta de Showcase, lectura de la grilla (`op_data`), navegación a
+  cada función, extracción del mapa de butacas y envío del email.
+- El sitio **exige iniciar sesión** (DNI/email + contraseña, sin opción de
+  invitado) para llegar al mapa de butacas — por eso el bot usa una
+  cuenta de Showcase (`SHOWCASE_USER` / `SHOWCASE_PASS`).
+- Pendiente fino: la clasificación horizontal de butacas (bloques /
+  pasillos) está calibrada solo contra la fila I/J/K; ver sección 6.
 
 ## Estructura
 
@@ -77,11 +74,9 @@ Mirá que:
    imprime el mensaje de error del sitio.
 2. **Grilla**: imprime "Funciones IMAX encontradas en la grilla: N".
    Esto ya sabemos que anda.
-3. **Cada función en rango**: navega a su URL y llega al mapa de butacas.
-   **Acá es donde más probable falle la primera vez.** Si ves un
-   `TimeoutError` con un dump de HTML, es la pantalla intermedia de
-   cantidad de entradas: fijate en ese HTML cómo es el control real
-   (¿un `<select>`? ¿botones +/-? ¿un botón "Continuar"?) y ajustá
+3. **Cada función en rango**: navega a su URL y llega al mapa de butacas
+   (ya probado). Si alguna vez cambia el sitio y falla, tira un
+   `TimeoutError` con un dump de HTML para ver qué ajustar en
    `_intentar_setear_cantidad` / `_navegar_hasta_mapa` en `scraper.py`.
 
 Al final deberías ver algo así:
@@ -129,11 +124,72 @@ python main.py
 4. **Actions → "Chequear butacas La Odisea IMAX Norcenter" → Run workflow**
    para probarlo a mano. Mirá los logs.
 5. El workflow necesita permiso de escritura para guardar
-   `state/notified.json` de vuelta (ya está puesto en el YAML como
+   `state/notified.json` de vuelta (ya está en el YAML como
    `permissions: contents: write`). Si tu organización lo bloquea:
    **Settings → Actions → General → Workflow permissions → Read and write**.
 
-Una vez confirmado, el cron lo corre solo.
+## 3b. Que corra solo cada 10 minutos
+
+El archivo `.github/workflows/check-seats.yml` ya trae:
+
+```yaml
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # cada 10 min (horario UTC)
+  workflow_dispatch:          # además, botón manual
+```
+
+Para que el cron se active **no hay que tocar nada más**, pero sí que se
+cumplan estas condiciones:
+
+1. **El `.yml` tiene que estar en la rama por defecto del repo** (en tu
+   caso `master`). GitHub solo dispara `schedule` desde esa rama. Si lo
+   editás en otra rama, el cron no corre hasta mergear a `master`.
+2. **Actions habilitado**: Settings → Actions → General → "Allow all
+   actions and reusable workflows".
+3. **El workflow no tiene que estar deshabilitado**: Actions → (panel
+   izquierdo) "Chequear butacas…" → si aparece un botón **"Enable
+   workflow"**, clickealo.
+
+### Por qué puede parecer que "no corre"
+
+- **GitHub tarda en arrancar el primer cron de un repo nuevo**: puede
+  demorar 10–20 min (a veces más) desde el primer push a `master`.
+- **`*/10` es "a lo sumo cada 10 min", no exacto.** El scheduler de
+  GitHub es una cola compartida; en horas pico **atrasa 10–40 min o
+  incluso saltea corridas**. Es una limitación conocida de GitHub, no un
+  bug del bot. Si querés cadencia garantizada, GitHub Actions no es la
+  herramienta (habría que un server/cron propio).
+- **GitHub deshabilita el cron tras 60 días sin actividad en el repo.**
+  Como el bot commitea `state/notified.json` cuando avisa, y podés hacer
+  un commit cada tanto, no debería pasar. Si pasa, entrá a Actions y
+  reactivalo.
+
+### Cómo verificar
+
+Actions → filtro **Event → `schedule`**. Si ves corridas con ese origen,
+el cron está andando. Si después de ~30 min del push a `master` no hay
+ninguna: hacé un commit cualquiera para "empujar" al scheduler y revisá
+los 3 puntos de arriba.
+
+### Costo de minutos (importante)
+
+`*/10` ≈ **144 corridas/día**, ~1–2 min cada una.
+- Repo **público** → Actions es gratis e ilimitado. **Recomendado.**
+- Repo **privado** → el plan gratis da 2000 min/mes y esto se pasa en
+  ~1 semana. Opciones: hacer el repo público, subir el intervalo
+  (`*/20`, `*/30`), o limitar las horas del cron. Ej. correr solo de
+  05:00 a 24:00 hora Argentina (= 08:00–02:59 UTC):
+
+  ```yaml
+  schedule:
+    - cron: "*/10 8-23 * * *"
+    - cron: "*/10 0-2 * * *"
+  ```
+
+  (Ojo: el cron es en **UTC**; Argentina es UTC−3. El rango horario que
+  filtra *qué funciones* mirar — `MONITOR_START_HOUR/END_HOUR` — es
+  aparte y está en hora local del sitio.)
 
 ## 4. Rango horario y otros ajustes
 
@@ -156,12 +212,58 @@ archivo a `[]` para re-armar todo).
 
 ## 6. Qué se considera "buena butaca"
 
-En `seat_ranking.py`, listas `IDEAL_ROWS` (F, G, H, I) y `OK_ROWS`
-(E, J, K), más `ROW_WIDTHS` con el ancho de cada fila. El score combina
-distancia al centro horizontal (peso 0.6) y distancia a la fila ideal
-(0.4). Ojo: `ROW_WIDTHS` viene de un relevamiento previo y **todavía no
-lo pudimos verificar contra el mapa real** (está detrás del login).
-Ajustalo cuando veas la sala de verdad.
+Todo en `seat_ranking.py`. Hay dos ejes:
+
+**Vertical (letra de fila):**
+- `IDEAL_ROWS = {F, G, H, I}` — el corazón de la sala.
+- `OK_ROWS = {E, J, K, L, M}` — aceptables como segunda opción.
+- Cualquier otra fila (A–D) no dispara aviso.
+
+**Horizontal (número de butaca dentro de la fila):** la sala está
+partida por dos pasillos en 3 bloques. `CENTER_BLOCK[fila] = (primera,
+última)` guarda el bloque **central** de cada fila. `OK_MARGIN = 4`
+butacas a cada lado del bloque central todavía cuentan como "ok".
+
+- `buena` → butaca dentro del bloque central.
+- `ok` → hasta 4 butacas afuera del bloque central (a cada lado).
+- `mala` → el resto (butacas contra la pared).
+
+**Clasificación final** (combina los dos ejes; es lo que decide si se
+avisa):
+
+- `ideal` → fila F–I **y** butaca `buena`.
+- `ok` → fila E–M y butaca `buena` u `ok` (y no llega a `ideal`).
+- `else` → butaca `mala`, o fila A–D. **No dispara aviso.**
+
+El bot elige, entre los pares contiguos disponibles, el de mejor clase
+(`ideal` < `ok` < `else`) y, dentro de la misma clase, el más centrado
+(`score` = 0.6 × distancia al centro + 0.4 × distancia a la fila G).
+
+### Grilla completa (correr `python seat_ranking.py`)
+
+```
+fila  ancho  IDEAL (butacas)     OK (butacas)            else (butacas)
+A       19   -                   -                       1-19
+B       21   -                   -                       1-21
+C       23   -                   -                       1-23
+D       27   -                   -                       1-27
+E       29   -                   4-26                    1-3, 27-29
+F       31   9-23                5-8, 24-27              1-4, 28-31
+G       33   10-24               6-9, 25-28              1-5, 29-33
+H       35   11-25               7-10, 26-29             1-6, 30-35
+I       37   12-26               8-11, 27-30             1-7, 31-37
+J       37   -                   8-30                    1-7, 31-37
+K       37   -                   8-30                    1-7, 31-37
+L       29   -                   4-26                    1-3, 27-29
+M       33   -                   6-28                    1-5, 29-33
+```
+
+⚠️ **Calibración**: `CENTER_BLOCK` está verificado a mano **solo para
+I/J/K = (12, 26)**. Para el resto asume un bloque central de ~15 butacas
+centrado en la fila. `ROW_WIDTHS` sí está confirmado contra dumps reales
+(salvo L, que nunca mostró butacas > 22; quedó en 29 por estimación).
+Si verificás los pasillos de otra fila, editá su tupla en
+`CENTER_BLOCK` en `seat_ranking.py`.
 
 ## Notas técnicas
 

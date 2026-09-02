@@ -17,6 +17,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+from seat_ranking import pair_class
+
 COMPRA_URL = "https://entradas.todoshowcase.com/showcase/pelicula.aspx?filmid=5875"
 
 
@@ -56,12 +58,16 @@ def build_email_body(avisos) -> str:
 
     for fr, best_pair in avisos:
         perf = fr.performance
-        lines.append(f"▶ {perf.date}  {perf.show_time}  ·  {perf.format_desc}")
+        lines.append(
+            f">> {perf.date}  {perf.show_time}  -  {perf.format_desc}  "
+            f"[{pair_class(best_pair).upper()}]"
+        )
         lines.append(f"  Butacas libres en la sala ahora: {len(fr.disponibles)}")
-        lines.append("  Mejor par contiguo y centrado:")
+        lines.append("  Mejor par contiguo:")
         for seat in best_pair:
             lines.append(
-                f"    - Fila {seat.row}, asiento {seat.num} (zona: {seat.zona})"
+                f"    - Fila {seat.row}, asiento {seat.num}  "
+                f"({seat.clase} | fila {seat.zona} / butaca {seat.h_zona})"
             )
         lines.append("")
 

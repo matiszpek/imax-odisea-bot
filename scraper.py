@@ -253,6 +253,7 @@ def _navegar_hasta_mapa(page: Page, perf: Performance, cantidad: int) -> None:
 
     # ¿Ya estamos en el mapa?
     if page.locator("input[type='image']").count() > 0:
+        _sweep_seatmap(page)
         return
 
     # Pantalla de cantidad de entradas. Probamos las variantes conocidas
@@ -280,6 +281,45 @@ def _navegar_hasta_mapa(page: Page, perf: Performance, cantidad: int) -> None:
             f"No apareció el mapa de butacas para {perf.label}. "
             f"URL actual: {page.url}\n--- HTML (recortado) ---\n{dump}"
         )
+
+    _sweep_seatmap(page)
+
+
+def _sweep_seatmap(page: Page) -> None:
+    """
+    El mapa avisa "Puede desplazarse horizontalmente para ver más
+    lugares": si el contenedor de butacas hace scroll horizontal, algunas
+    butacas podrían no estar renderizadas hasta que se scrollea. Por las
+    dudas, recorremos el contenedor de izquierda a derecha antes de leer.
+
+    Es best-effort: si no encuentra un contenedor scrolleable, no hace
+    nada (y `_extract_seats` igual lee lo que haya en el DOM).
+    """
+    try:
+        page.evaluate(
+            """async () => {
+                const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+                const img = document.querySelector("input[type='image']");
+                if (!img) return;
+                // buscar el ancestro que scrollea horizontalmente
+                let el = img.parentElement;
+                let cont = null;
+                while (el && el !== document.body) {
+                    if (el.scrollWidth > el.clientWidth + 20) { cont = el; break; }
+                    el = el.parentElement;
+                }
+                const target = cont || document.scrollingElement || document.body;
+                const max = target.scrollWidth;
+                for (let x = 0; x <= max; x += Math.max(200, target.clientWidth - 100)) {
+                    target.scrollLeft = x;
+                    await sleep(120);
+                }
+                target.scrollLeft = 0;
+                await sleep(120);
+            }"""
+        )
+    except Exception:
+        pass
 
 
 def _intentar_setear_cantidad(page: Page, cantidad: int) -> None:
@@ -323,7 +363,7 @@ def _extract_seats(page: Page) -> list[Seat]:
             src: e.src ? e.src.split('/').pop() : ''
         }))""",
     )
-    seats: list[Seat] = []
+    por_butaca: dict[tuple[str, int], Seat] = {}
     for item in raw:
         title = item.get("title", "")
         if "-" not in title:
@@ -331,9 +371,16 @@ def _extract_seats(page: Page) -> list[Seat]:
         row, num_str = title.rsplit("-", 1)
         if not num_str.isdigit():
             continue
+        row = row.strip()
+        num = int(num_str)
         state = STATE_MAP.get(item.get("src", ""), "desconocido")
-        seats.append(Seat(row=row.strip(), num=int(num_str), state=state))
-    return seats
+        # Si aparece repetida (p. ej. tras scrollear), nos quedamos con
+        # la lectura que tenga un estado conocido.
+        prev = por_butaca.get((row, num))
+        if prev is None or (prev.state == "desconocido" and state != "desconocido"):
+            por_butaca[(row, num)] = Seat(row=row, num=num, state=state)
+
+    return sorted(por_butaca.values(), key=lambda s: (s.row, s.num))
 
 
 # --------------------------------------------------------------------------- #
@@ -371,7 +418,10 @@ def check_functions(
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(locale="es-AR")
+        context = browser.new_context(
+            locale="es-AR",
+            viewport={"width": 1920, "height": 1080},
+        )
         page = context.new_page()
 
         try:

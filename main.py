@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 from scraper import check_functions, LoginError
-from seat_ranking import find_best_pair, IDEAL_ROWS, OK_ROWS
+from seat_ranking import find_best_pair, pair_class
 from notifier import send_email, build_email_body
 
 STATE_FILE = Path(__file__).parent / "state" / "notified.json"
@@ -42,9 +42,9 @@ MONITOR_START_HOUR = int(os.environ.get("MONITOR_START_HOUR", "16"))
 MONITOR_END_HOUR = int(os.environ.get("MONITOR_END_HOUR", "24"))
 HEADLESS = os.environ.get("HEADLESS", "1") not in ("0", "false", "no")
 
-# Solo notificamos si el mejor par cae en zona "ideal" u "ok". Si lo
-# único contiguo está en una fila mala (muy adelante/atrás), no molesta.
-ZONAS_ACEPTABLES = IDEAL_ROWS | OK_ROWS
+# Solo avisamos si el mejor par contiguo clasifica como "ideal" u "ok"
+# (ver seat_ranking.classify_seat). Si lo único contiguo es "else"
+# (butacas contra la pared o filas muy adelante), no molestamos.
 
 
 def _load_notified() -> set[int]:
@@ -109,16 +109,17 @@ def main() -> None:
             )
             continue
 
-        peor_fila = max(best_pair, key=lambda s: s.score).row
-        if peor_fila not in ZONAS_ACEPTABLES:
+        clase = pair_class(best_pair)
+        if clase == "else":
             print(
-                f"{perf.label}: mejor par en fila {best_pair[0].row}, fuera "
-                f"de zona aceptable. No se avisa."
+                f"{perf.label}: el mejor par contiguo es 'else' "
+                f"(fila {best_pair[0].row}, asientos {[s.num for s in best_pair]}). "
+                f"No se avisa."
             )
             continue
 
         print(
-            f"{perf.label}: ¡par bueno! fila {best_pair[0].row}, "
+            f"{perf.label}: ¡par {clase}! fila {best_pair[0].row}, "
             f"asientos {[s.num for s in best_pair]}."
         )
         nuevos_avisos.append((fr, best_pair))
@@ -130,8 +131,8 @@ def main() -> None:
     body = build_email_body(nuevos_avisos)
     cantidad_funciones = len(nuevos_avisos)
     subject = (
-        f"🎬 La Odisea IMAX Norcenter: butacas en "
-        f"{cantidad_funciones} función{'es' if cantidad_funciones > 1 else ''}"
+        f"La Odisea IMAX Norcenter: butacas en "
+        f"{cantidad_funciones} funcion{'es' if cantidad_funciones > 1 else ''}"
     )
     send_email(subject=subject, body=body)
     print(f"Email enviado con {cantidad_funciones} función(es).")
